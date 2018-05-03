@@ -175,12 +175,12 @@ def get_instance(module):
             logging.debug("VM dictionary %s" % json.dumps(vm_dict, indent=4))
             inst['vm_state'] = 'present'
             inst['vm_status'] = vm_dict['status']
-            inst['vm_memory'] = vm_dict['memoryMB']
-            inst['vm_cpus'] = vm_dict['numberOfCpus']
+            inst['vm_memory'] = str(vm_dict['memoryMB'])
+            inst['vm_cpus'] = str(vm_dict['numberOfCpus'])
             inst['interfaces'] = vm_dict['interfaces']
             inst['custom_script'] = vm_dict['custom_script']
             inst['admin_password'] = vm_dict['admin_password']
-            inst['tags'] = vm_dict.get('tags', None)
+            inst['tags'] = vm_dict.get('tags', [])
             inst['vm_hostname'] = vm_dict['hostname']
         return inst
     except VcdError:
@@ -195,10 +195,24 @@ def create_vm(module):
     spec = get_vm_spec(module)
 
     vapp_name = module.params['vapp_name']
+    vm_name = module.params['vm_name']
     vapp = module.get_vapp(vapp_name)
     task = vapp.add_vms([spec], all_eulas_accepted=True)
     module.wait_for_task(task)
 
+    if 'vm_cpus' in module.params or 'vm_memory' in module.params:
+        vm = module.get_vm(vapp_name, vm_name)
+        if 'vm_cpus' in module.params:
+            module.wait_for_task(vm.power_off())
+            module.wait_for_task(vm.modify_cpu(module.params['vm_cpus']))
+            vm = module.get_vm(vapp_name, vm_name)
+            module.wait_for_task(vm.power_on())
+        elif 'vm_memory' in module.params:
+            module.wait_for_task(vm.power_off())
+            module.wait_for_task(vm.modify_memory(module.params['vm_memory']))
+            vm = module.get_vm(vapp_name, vm_name)
+            module.wait_for_task(vm.power_on())
+    
     # TODO: Set metadata for vm
     if 'tags' in module.params:
         for name, value in module.params['tags'].items():
@@ -256,21 +270,26 @@ def get_vm_spec(module):
 
 
 def change_vm(module, difference):
-    needs_change = reduce((lambda x, y: x or y), [v for item in difference for k, v in item.items()])
-    diff_dict = {k: v for item in difference for k, v in item.items()}
+    needs_change = len(difference) > 0
+    changed = False
     if module.check_mode:
         return needs_change
     if needs_change:
-        vm_name = module.params['vapp_name']
-        if not diff_dict['vm_cpus']:
-            vm = module.get_vm(vm_name)
-            vm.set_cpu(module.params['vm_cpus'])
-        elif not diff_dict['vm_memory']:
-            vm = module.get_vm(vm_name)
-            vm.set_memory(module.params['vm_memory'])
-        else:
-            module.fail("Only supports vm and cpu changes atm")
-        return True
+        vapp_name = module.params['vapp_name']
+        vm_name = module.params['vm_name']
+        vm = module.get_vm(vapp_name, vm_name)
+        for diff in difference:
+            if 'vm_cpus' in difference:
+                module.wait_for_task(vm.power_off())
+                module.wait_for_task(vm.modify_cpu(module.params['vm_cpus']))
+                module.wait_for_task(vm.power_on())
+                changed = True
+            elif 'vm_memory' in difference:
+                module.wait_for_task(vm.power_off())
+                module.wait_for_task(vm.modify_memory(module.params['vm_memory']))
+                module.wait_for_task(vm.power_on())
+                changed = True
+        return changed
 
 def main():
     argument_spec = dict(
@@ -302,7 +321,7 @@ def main():
 
     result = dict(changed=False, diff=list())
 
-    result['diff'] = [{diff_tag: has_difference(param=diff_tag, actual_state=instance, desired_state=module.params)} for diff_tag in VM_DIFF_PROPS]
+    result['diff'] = [diff_tag for diff_tag in VM_DIFF_PROPS if has_difference(param=diff_tag, actual_state=instance, desired_state=module.params)]
 
     logging.debug("Diff %s" % result['diff'].__repr__())
     if instance is not None and desired_state == 'absent':
@@ -316,7 +335,8 @@ def main():
              result['changed'] = True
          else:
              result['changed'] = change_vm(module, result['diff'])
-
+    if result['changed'] != True:
+        del result['diff']
     return module.exit(**result)
 
 
