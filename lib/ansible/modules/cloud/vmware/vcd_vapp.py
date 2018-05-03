@@ -106,9 +106,12 @@ def create(module):
         description="Created by ansible",
         network=network_name
     )
-
     module.wait_for_task(vapp_resource.Tasks.Task[0])
 
+    if module.params['tags'] is not None:
+        vapp = module.get_vapp(vapp_name)
+        for name, value in module.params['tags'].items():
+            vapp.set_metadata(key=name, value=value)
 
 def delete(module):
     vapp_name = module.params['vapp_name']
@@ -120,6 +123,7 @@ def main():
         vapp_name=dict(required=True),
         network_name=dict(required=True),
         vdc_name=dict(required=True),
+        tags=dict(required=False, type='dict'),
         state=dict(default='present', choices=VAPP_STATES)
     )
 

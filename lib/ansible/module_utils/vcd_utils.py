@@ -3,15 +3,20 @@
 # Author: Fabian Landis (@fabland)
 
 try:
-    from pyvcloud.vcd.client import Client, TaskStatus
+    from pyvcloud.vcd.client import Client, TaskStatus, NSMAP
     from pyvcloud.vcd.client import VcdErrorResponseException
     from pyvcloud.vcd.client import BasicLoginCredentials
     from pyvcloud.vcd.client import EntityType
     from pyvcloud.vcd.org import Org
     from pyvcloud.vcd.vdc import VDC
     from pyvcloud.vcd.vapp import VApp
+    from pyvcloud.vcd.vm import VM
     from pyvcloud.vcd.utils import vapp_to_dict
     from pyvcloud.vcd.utils import to_dict
+    from pyvcloud.vcd.client import QueryResultFormat
+    from lxml.objectify import NoneElement
+    from pyvcloud.vcd.client import RelationType
+    import lxml.objectify
     import requests
 
     HAS_PYVCLOUD = True
@@ -97,9 +102,9 @@ class VcdAnsibleModule(AnsibleModule):
         try:
             vapp_resource = self.vdc.get_vapp(vapp_name)
         except Exception:
-            return None
+            raise VcdError('vcd instance has no vapp named %s' % vapp_name)
         vapp = VApp(client=self.client, resource=vapp_resource)
-        if not vapp:
+        if vapp is None:
             raise VcdError('vcd instance has no vapp named %s' % vapp_name)
         return vapp
 
@@ -107,9 +112,9 @@ class VcdAnsibleModule(AnsibleModule):
         try:
             vapp_resource = self.vdc.get_vapp(vapp_name)
         except Exception:
-            return None
+            raise VcdError('vcd instance has no vapp named %s' % vapp_name)
         vapp = VApp(client=self.client, resource=vapp_resource)
-        if not vapp:
+        if vapp is None:
             raise VcdError('vcd instance has no vapp named %s' % vapp_name)
         md = vapp.get_metadata()
         access_control_settings = vapp.get_access_settings()
@@ -117,10 +122,20 @@ class VcdAnsibleModule(AnsibleModule):
 
     def get_vm(self, vapp_name, vm_name):
         vapp = self.get_vapp(vapp_name)
-        vm = vapp.get_vm(vm_name=vm_name)
-        if not vm:
+        vm = VM(client=self.client, resource=vapp.get_vm(vm_name=vm_name))
+        if vm is None:
             raise VcdError('vapp has no vm named %s' % vm_name)
         return vm
+
+    def get_vm_dict(self, vapp_name, vm_name):
+        q = self.client.get_typed_query('vm', QueryResultFormat.ID_RECORDS, qfilter='containerName==' + vapp_name)
+        vms = list(q.execute())
+        for vm in vms:
+            vm_dict = to_dict(vm)
+            if vm_dict['name'] == vm_name:
+                second_dict = self.vm_to_dict(vapp_name, vm_name)
+                return dict(vm_dict, **second_dict)
+        return None
 
     def create_client_instance(self):
         host = self.params['host']
@@ -137,12 +152,58 @@ class VcdAnsibleModule(AnsibleModule):
             requests.packages.urllib3.disable_warnings()
 
         client = Client(host, verify_ssl_certs=verify, api_version=version,
-                log_file='/tmp/ansible_pyvcloud.log', log_requests=True, log_bodies=True, log_headers=True)
+               log_file='/tmp/ansible_pyvcloud.log', log_requests=True, log_bodies=True, log_headers=True)
         try:
             client.set_credentials(BasicLoginCredentials(user=username, org=org, password=password))
         except VcdErrorResponseException as e:
             raise VcdError('Login to VCD failed', msg=e.vcd_error)
         return client
+
+    def vm_to_dict(self, vapp_name, vm_name):
+        try:
+            vapp_resource = self.vdc.get_vapp(vapp_name)
+        except Exception:
+            raise VcdError('vcd instance has no vapp named %s' % vapp_name)
+        vm = None
+        if hasattr(vapp_resource, 'Children') and hasattr(vapp_resource.Children, 'Vm'):
+            for vmx in vapp_resource.Children.Vm:
+                if vmx.get('name') == vm_name:
+                    vm = vmx
+        
+        result = {}
+        result_interfaces = []
+        items = vm.xpath(
+            'ovf:VirtualHardwareSection/ovf:Item', namespaces=NSMAP)
+        for item in items:
+            element_name = item.find('rasd:ElementName', NSMAP)
+            connection = item.find('rasd:Connection', NSMAP)
+            if connection is not None:
+                result_interfaces.append({
+                    'network': connection.text,
+                    'index': item.find('rasd:AddressOnParent', NSMAP).text,
+                    'addressing_type': connection.get('{' + NSMAP['vcloud'] + '}ipAddressingMode'),
+                    'ip_address': connection.get('{' + NSMAP['vcloud'] + '}ipAddress'),
+                    'primary': connection.get('{' + NSMAP['vcloud'] + '}primaryNetworkConnection'),
+                    'mac': item.find('rasd:Address', NSMAP).text
+                })
+        if hasattr(vm, 'GuestCustomizationSection'):
+            if hasattr(vm.GuestCustomizationSection, 'AdminPassword'):
+                result['admin_password'] = vm.GuestCustomizationSection.AdminPassword.text
+            if hasattr(vm.GuestCustomizationSection, 'ComputerName'):
+                result['hostname'] = vm.GuestCustomizationSection.ComputerName.text
+            if hasattr(vm.GuestCustomizationSection, 'CustomizationScript'):
+                result['custom_script'] = vm.GuestCustomizationSection.CustomizationScript.text
+        result['interfaces'] = result_interfaces
+        
+        metadata = self.client.get_linked_resource(vm, RelationType.DOWN, EntityType.METADATA.value)
+        # for vapp metadata -> copy over to vapp part
+        if metadata is not None and hasattr(metadata, 'MetadataEntry'):
+            metadata_dict = {}
+            for me in metadata.MetadataEntry:
+                metadata_dict[me.Key.text] = me.TypedValue.Value.text
+            result['tags'] = metadata_dict
+        #logging.debug("Second result " + json.dumps(result, indent=4))
+        return result
 
     def logout(self):
         self._client.logout()
