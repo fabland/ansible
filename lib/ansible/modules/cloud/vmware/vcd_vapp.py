@@ -122,8 +122,7 @@ def main():
     argument_spec = dict(
         vapp_name=dict(required=True),
         network_name=dict(required=True),
-        vdc_name=dict(required=True),
-        tags=dict(required=False, type='dict'),
+        metadata=dict(required=False, type='dict'),
         state=dict(default='present', choices=VAPP_STATES)
     )
 

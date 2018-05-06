@@ -137,6 +137,7 @@ EXAMPLES = '''
 '''
 
 from ansible.module_utils.vcd_utils import VcdAnsibleModule, VcdError
+from pyvcloud.vcd.vm import VM
 import logging
 
 VM_STATUS = {
@@ -150,7 +151,7 @@ VM_STATES = ['present', 'absent']
 
 VM_DIFF_PROPS = ['vm_memory',
                  'vm_cpus',
-                 'tags',
+                 'metadata',
                  'vm_hostname',
                  'admin_password',
                  'interfaces',
@@ -201,17 +202,8 @@ def create_vm(module):
     module.wait_for_task(task)
 
     if 'vm_cpus' in module.params or 'vm_memory' in module.params:
-        vm = module.get_vm(vapp_name, vm_name)
-        if 'vm_cpus' in module.params:
-            module.wait_for_task(vm.power_off())
-            module.wait_for_task(vm.modify_cpu(module.params['vm_cpus']))
-            vm = module.get_vm(vapp_name, vm_name)
-            module.wait_for_task(vm.power_on())
-        elif 'vm_memory' in module.params:
-            module.wait_for_task(vm.power_off())
-            module.wait_for_task(vm.modify_memory(module.params['vm_memory']))
-            vm = module.get_vm(vapp_name, vm_name)
-            module.wait_for_task(vm.power_on())
+        update_vm_with(module=module, param='vm_cpus', function=VM.modify_cpu)
+        update_vm_with(module=module, param='vm_memory', function=VM.modify_memory)
     
     # TODO: Set metadata for vm
     if 'tags' in module.params:
@@ -237,6 +229,20 @@ def delete_vm(module):
 
 def has_difference(param, actual_state, desired_state):
     return actual_state.get(param, '') != desired_state[param]
+
+def update_vm_with(module, param, function):
+    if param in module.params:
+        vapp_name = module.params['vapp_name']
+        vm_name = module.params['vm_name']
+        vm = module.get_vm(vapp_name, vm_name)
+        module.wait_for_task(vm.power_off())
+        module.wait_for_task(function(vm, module.params[param]))
+        vm = module.get_vm(vapp_name, vm_name)
+        module.wait_for_task(vm.power_on())
+        return True
+    else:
+        return False
+
 
 def get_vm_spec(module):
     vm_name = module.params['vm_name']
@@ -273,38 +279,41 @@ def change_vm(module, difference):
     needs_change = len(difference) > 0
     changed = False
     if module.check_mode:
-        return needs_change
+        return True
     if needs_change:
         vapp_name = module.params['vapp_name']
         vm_name = module.params['vm_name']
         vm = module.get_vm(vapp_name, vm_name)
         for diff in difference:
-            if 'vm_cpus' in difference:
-                module.wait_for_task(vm.power_off())
-                module.wait_for_task(vm.modify_cpu(module.params['vm_cpus']))
-                module.wait_for_task(vm.power_on())
+            if diff == 'vm_cpus':
+                update_vm_with(module,param='vm_cpus', function=VM.modify_cpu)
                 changed = True
-            elif 'vm_memory' in difference:
-                module.wait_for_task(vm.power_off())
-                module.wait_for_task(vm.modify_memory(module.params['vm_memory']))
-                module.wait_for_task(vm.power_on())
+            elif diff == 'vm_memory':
+                update_vm_with(module,param='vm_memory', function=VM.modify_memory)
                 changed = True
-        return changed
+    return changed
 
 def main():
+
+    interface_sub_spec = dict(
+        primary=dict(default=False, type='bool'),
+        network=dict(required=True, type='str'),
+        addressing_type=dict(required=True, choices=['pool', 'static', 'dhcp']),
+        ip_address=dict(type='str')
+    )
+
     argument_spec = dict(
         vm_name=dict(required=True, type='str'),
         vm_hostname=dict(required=True, type='str'),
         admin_password=dict(required=False, no_log=True, type='str'),
-        interfaces=dict(required=False, type='raw'),
+        interfaces=dict(required=False, type='list', elements='dict', options=interface_sub_spec),
         vm_cpus=dict(required=False, type='str'),
         vm_memory=dict(required=False, type='str'),
         custom_script=dict(required=False, type='str'),
-        tags=dict(required=False, type='dict'),
+        metadata=dict(required=False, type='dict'),
         catalog=dict(required=False, type='str'),
         template=dict(required=False, type='str'),
         vapp_name=dict(required=True, type='str'),
-        vdc_name=dict(required=True, type='str'),
         state=dict(default='present', choices=VM_STATES)
     )
 

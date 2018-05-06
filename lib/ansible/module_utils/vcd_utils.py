@@ -27,6 +27,7 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible.errors import AnsibleError
 import logging
 import json
+import os
 
 DEFAULT_VERSION = '29.0'
 
@@ -38,32 +39,43 @@ class VcdError(Exception):
         super(VcdError, self).__init__(msg)
 
 
-def vcd_argument_spec():
+def vcd_sub_argument_spec():
     return dict(
         username=dict(type='str', aliases=['user'], required=True),
-        password=dict(type='str', aliases=['pass', 'passwd'], required=True, no_log=True),
-        org=dict(),
-        service_id=dict(),
-        instance_id=dict(),
-        host=dict(),
+        password=dict(type='str', aliases=['pass', 'passwd'], no_log=True, required=True),
+        org=dict(type='str', required=True),
+        host=dict(type='str', required=True),
         api_version=dict(default=DEFAULT_VERSION),
-        vdc_name=dict(),
-        gateway_name=dict(default='gateway'),
+        vdc_name=dict(type='str', required=True),
         verify_certs=dict(type='bool', default=True)
     )
+
+def vcd_argument_spec():
+    return dict(
+        vcd_connection=dict(type='dict', required=True, options=vcd_sub_argument_spec()), 
+        gateway_name=dict(default='gateway')
+)
 
 class VcdAnsibleModule(AnsibleModule):
 
     def __init__(self, *args, **kwargs):
         argument_spec = vcd_argument_spec()
+        required_common_parameters = list(argument_spec.keys())
         argument_spec.update(kwargs.get('argument_spec', dict()))
         kwargs['argument_spec'] = argument_spec
 
         super(VcdAnsibleModule, self).__init__(*args, **kwargs)
 
+        #if self.params.get('password') is None:
+        #    self.params['password'] = os.environ.get('VCD_PASSWORD')
         if not HAS_PYVCLOUD:
             self.fail("python module pyvcloud >= 19 is required for this module")
         
+        #missing_parameters = [key for key in required_common_parameters if self.params.get(key) is None]
+        #if len(missing_parameters) > 0:
+        #    self.fail("The following parameters are missing: %s" % missing_parameters)
+        
+        self._common = self.params['vcd_connection']
         self._client = self.create_client_instance()
 
         self._gateway = None
@@ -78,7 +90,7 @@ class VcdAnsibleModule(AnsibleModule):
     def org(self):
         if self._org is not None:
             return self._org
-        org_name = self.params['org']
+        org_name = self._common['org']
         org_resource = self.client.get_org()
         _org = Org(client=self.client, resource=org_resource)
         if not _org:
@@ -90,7 +102,7 @@ class VcdAnsibleModule(AnsibleModule):
     def vdc(self):
         if self._vdc is not None:
             return self._vdc
-        vdc_name = self.params['vdc_name']
+        vdc_name = self._common['vdc_name']
         vdc_resource = self.org.get_vdc(vdc_name)
         _vdc = VDC(client=self.client, resource=vdc_resource)
         if not _vdc:
@@ -138,12 +150,12 @@ class VcdAnsibleModule(AnsibleModule):
         return None
 
     def create_client_instance(self):
-        host = self.params['host']
-        version = self.params.get('api_version')
-        verify = self.params.get('verify_certs')
-        password = self.params['password']
-        username = self.params['username']
-        org = self.params['org']
+        host = self._common['host']
+        version = self._common['api_version']
+        verify = self._common['verify_certs']
+        password = self._common['password']
+        username = self._common['username']
+        org = self._common['org']
         
         if not org:
             raise VcdError('missing required org for service_type vcd')
