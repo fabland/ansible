@@ -32,43 +32,38 @@ options:
       - Configures the state of the vApp.
     default: present
     choices: ['present', 'absent', 'deployed', 'undeployed']
-  tags:
+  metadata:
     description:
-      - Adds list of meta info tags as ansibleX - mytag to the vApp
-  username:
-    description:
-      - The vCloud username to use during authentication
-  password:
-    description:
-      - The vCloud password to use during authentication
-  org:
-    description:
-      - The org to login to for creating vapp.
-  host:
-    description:
-      - The authentication host to be used when service type  is vcd.
-  api_version:
-    description:
-      - The api version to be used with the vca
-    default: "29.0"
-  vdc_name:
-    description:
-      - The name of the virtual data center (VDC) where the vm should be created or contains the vAPP.
+      - Dictionary of name - value entries that are added to the vApp (as vcloud metadata type string)
   network_name:
       - Name of the network to connect the vapp to. Other networks can be created and added with the vcd_net module.
-extends_documentation_fragment: vcd
+extends_documentation_fragment: vcd_utils
 '''
 
 EXAMPLES = '''
 
-- name: Creates a new vApp in a VCD instance
-  vca_vapp:
-    vapp_name: myVapp
-    state: present
-    vdc_name: VDC1
-    username: '<your username here>'
-    password: '<your password here>'
-    network_name: my-net
+  vars:
+     internal_vm_ip: 10.0.0.50
+     vcd_connection_common:
+        host: "my.vcloud.host"
+        username: "{{ vcloud_user_name }}"
+        password: "{{ vcloud_password }}"
+        org: myorg
+        vdc_name: myvdc
+        verify_certs: no
+        api_version: "29.0"
+     
+  tasks:
+  # Example how to create empty vapp container
+     - name: Demo app vApp container
+       vcd_vapp:
+         vcd_connection: "{{ vcd_connection_common }}"
+         vapp_name: demo_app
+         network_name: my-main-org-net
+         state: present
+         metadata:
+           mytagx: metadatavalue
+           mytagy: "some other value"
 
 '''
 
@@ -106,12 +101,15 @@ def create(module):
         description="Created by ansible",
         network=network_name
     )
-    module.wait_for_task(vapp_resource.Tasks.Task[0])
+    for task in vapp_resource.Tasks.Task:
+        module.wait_for_task(task)
 
-    if module.params['tags'] is not None:
+    module.vdc.reload()
+
+    if module.params['metadata'] is not None:
         vapp = module.get_vapp(vapp_name)
-        for name, value in module.params['tags'].items():
-            vapp.set_metadata(key=name, value=value)
+        for name, value in module.params['metadata'].items():
+            vapp.set_metadata(key=name, value=value, domain='GENERAL', visibility='READWRITE')
 
 def delete(module):
     vapp_name = module.params['vapp_name']

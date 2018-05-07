@@ -3,7 +3,7 @@
 # Author: Fabian Landis (@fabland)
 
 try:
-    from pyvcloud.vcd.client import Client, TaskStatus, NSMAP
+    from pyvcloud.vcd.client import Client, TaskStatus, NSMAP, E
     from pyvcloud.vcd.client import VcdErrorResponseException
     from pyvcloud.vcd.client import BasicLoginCredentials
     from pyvcloud.vcd.client import EntityType
@@ -171,6 +171,12 @@ class VcdAnsibleModule(AnsibleModule):
             raise VcdError('Login to VCD failed', msg=e.vcd_error)
         return client
 
+    def vm_modify_cpu(self):
+        return VM.modify_cpu
+
+    def vm_modify_memory(self):
+        return VM.modify_memory
+
     def vm_to_dict(self, vapp_name, vm_name):
         try:
             vapp_resource = self.vdc.get_vapp(vapp_name)
@@ -213,9 +219,30 @@ class VcdAnsibleModule(AnsibleModule):
             metadata_dict = {}
             for me in metadata.MetadataEntry:
                 metadata_dict[me.Key.text] = me.TypedValue.Value.text
-            result['tags'] = metadata_dict
+            result['metadata'] = metadata_dict
         #logging.debug("Second result " + json.dumps(result, indent=4))
         return result
+
+
+    def vm_set_metadata(self,
+                     vm,
+                     metadata_dict,
+                     domain='GENERAL',
+                     visibility='READWRITE',
+                     metadata_type='MetadataStringValue'):
+        vm_resource = self.client.get_resource(vm.href)
+        for key, value in metadata_dict.items():
+            new_metadata = E.Metadata(
+                E.MetadataEntry(
+                    { 'type': 'xs:string' }, E.Domain(domain, visibility=visibility), E.Key(key),
+                    E.TypedValue( { '{' + NSMAP['xsi'] + '}type': 'MetadataStringValue' }, E.Value(value))))
+            metadata = self.client.get_linked_resource(
+                vm_resource, RelationType.DOWN, EntityType.METADATA.value)
+            self.wait_for_task(self.client.post_linked_resource(metadata, RelationType.ADD,
+                                                    EntityType.METADATA.value,
+                                                    new_metadata))
+            vm.reload()
+
 
     def logout(self):
         self._client.logout()
@@ -228,10 +255,7 @@ class VcdAnsibleModule(AnsibleModule):
     #         self.vca.block_until_completed(task)
 
     def wait_for_task(self, task):
-        self.client.get_task_monitor().wait_for_success(
-            task=task,
-            timeout=60,
-            poll_frequency=5)
+        self.client.get_task_monitor().wait_for_success(task=task)
 
     def fail(self, msg, **kwargs):
         self.fail_json(msg=msg, **kwargs)

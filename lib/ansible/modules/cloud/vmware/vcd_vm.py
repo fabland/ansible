@@ -7,9 +7,6 @@
 from __future__ import absolute_import, division, print_function
 
 import json
-import pickle
-
-from functools import reduce
 
 __metaclass__ = type
 
@@ -18,10 +15,7 @@ ANSIBLE_METADATA = {'metadata_version': '1.0',
                     'supported_by': 'community'}
 
 DOCUMENTATION = '''
-         custom_script: |
-           echo 123
-           touch /tmp/file1
-           touch /tmp/file2
+    )
 ---
 module: vcd_vm
 short_description: Manages VMs in vCloud Director instances.
@@ -57,11 +51,11 @@ options:
   interfaces:
     description:
       - List of network interfaces to create. They should have the following
-      properties:
-        - if_name: a name for the interface (not used at the moment)
+       dictionary entries:
+        - primary: True for primary interface (optional)
         - network: the network name to link the interface to
         - addressing_type: can be ['pool', 'dhcp', 'static']
-        - ip: for static addressing_type the ip that should be assigned
+        - ip_address: for static addressing_type the ip that should be assigned
   vm_cpus:
     description:
       - Number of CPUs
@@ -77,67 +71,54 @@ options:
       - Configures the state of the vApp.
     default: present
     choices: ['present', 'absent', 'poweron', 'poweroff']
-  tags:
+  metadata:
     description:
-      - Adds list of meta info tags as ansibleX - mytag
-  username:
-    description:
-      - The vCloud username to use during authentication
-  password:
-    description:
-      - The vCloud password to use during authentication
-  org:
-    description:
-      - The org to login to for creating vapp.
-  host:
-    description:
-      - The authentication host to be used when service type  is vcd.
-  api_version:
-    description:
-      - The api version to be used with the vca
-    default: "29.0"
-  vdc_name:
-    description:
-      - The name of the virtual data center (VDC) where the vm should be created or contains the vAPP.
-extends_documentation_fragment: vcd
+      - Dictionary of name - value entries that are added to the vm (as vcloud metadata type string)
+extends_documentation_fragment: vcd_utils
 '''
 
 EXAMPLES = '''
 
- - name: VM1 add to Demo app
-   vcd_vm:
-     vm_name: "vm1"
-     host: "my.vcd.host.local"
-     username: "{{ vcloud_user_name }}"
-     password: "{{ vcloud_password }}"
-     org: myorg
-     vdc_name: myvdc
-     verify_certs: no
-     catalog: my_catalog
-     template: Centos-7
-     vapp_name: demo_app3
-     vm_name: my_vm
-     vm_hostname: my_vm_host_name
-     admin_password: mypasswd
-     interfaces:
-       - if_name: ifone
-         network: my-org-net1
-         addressing_type: Pool
-       - if_name: iftwo
-         network: my-vapp-net01
-         addressing_type: Pool
-     vm_cpus: 2
-     vm_memory: 1024
-     custom_script: |
-       echo 123
-       touch /tmp/file1
-       touch /tmp/file2
-     tags: [utilities, web]
+  vars:
+     internal_vm_ip: 10.0.0.50
+     vcd_connection_common:
+        host: "my.vcloud.host"
+        username: "{{ vcloud_user_name }}"
+        password: "{{ vcloud_password }}"
+        org: myorg
+        vdc_name: myvdc
+        verify_certs: no
+        api_version: "29.0"
+  tasks:
+     - name: VM1 add to Demo app
+       vcd_vm:
+         vcd_connection: "{{ vcd_connection_common }}"
+         vm_name: myvm
+         catalog: mycatalog
+         template: centos7template
+         vapp_name: demo_app
+         vm_hostname: 'my-vm-host-name'
+         admin_password: mypasswd
+         interfaces:
+           - primary: true
+             network: my_main_org_net
+             addressing_type: static
+             ip_address: "{{ internal_vm_ip }}"
+           - network: my_secondary_org_net
+             addressing_type: pool
+         vm_cpus: 2
+         vm_memory: 1024
+         custom_script: |
+           echo 123
+           touch /tmp/file1
+           touch /tmp/file2
+         metadata:
+           mytag1: value123
+           mytag2: xyz
 
 '''
 
 from ansible.module_utils.vcd_utils import VcdAnsibleModule, VcdError
-from pyvcloud.vcd.vm import VM
 import logging
 
 VM_STATUS = {
@@ -156,6 +137,7 @@ VM_DIFF_PROPS = ['vm_memory',
                  'admin_password',
                  'interfaces',
                  'custom_script']
+
 
 def get_instance(module):
     vapp_name = module.params['vapp_name']
@@ -181,7 +163,7 @@ def get_instance(module):
             inst['interfaces'] = vm_dict['interfaces']
             inst['custom_script'] = vm_dict['custom_script']
             inst['admin_password'] = vm_dict['admin_password']
-            inst['tags'] = vm_dict.get('tags', [])
+            inst['metadata'] = vm_dict.get('metadata', [])
             inst['vm_hostname'] = vm_dict['hostname']
         return inst
     except VcdError:
@@ -190,27 +172,38 @@ def get_instance(module):
 
 def create_vm(module):
     if module.check_mode:
-        logging.info("Would create vm" )
+        logging.info("Would create vm")
         pass
 
     spec = get_vm_spec(module)
 
     vapp_name = module.params['vapp_name']
-    vm_name = module.params['vm_name']
     vapp = module.get_vapp(vapp_name)
     task = vapp.add_vms([spec], all_eulas_accepted=True)
     module.wait_for_task(task)
 
-    if 'vm_cpus' in module.params or 'vm_memory' in module.params:
-        update_vm_with(module=module, param='vm_cpus', function=VM.modify_cpu)
-        update_vm_with(module=module, param='vm_memory', function=VM.modify_memory)
-    
-    # TODO: Set metadata for vm
-    if 'tags' in module.params:
-        for name, value in module.params['tags'].items():
-            logging.info("TODO: Set metadata on vm")
+    update_vm_cpu(module)
+    update_vm_memory(module)
+    update_vm_metadata(module)
 
     # TODO: Connect rest of interfaces
+
+
+def change_vm(module, difference):
+    needs_change = len(difference) > 0
+    changed = False
+    if module.check_mode:
+        return True
+    if needs_change:
+        for diff in difference:
+            if diff == 'vm_cpus':
+                changed = changed | update_vm_cpu(module)
+            elif diff == 'vm_memory':
+                changed = changed | update_vm_memory(module)
+            elif diff == 'metadata':
+                changed = changed | update_vm_metadata(module)
+    return changed
+
 
 def delete_vm(module):
     if module.check_mode:
@@ -227,8 +220,29 @@ def delete_vm(module):
     task2 = vapp.delete_vms([vm_name])
     module.wait_for_task(task2)
 
+
 def has_difference(param, actual_state, desired_state):
     return actual_state.get(param, '') != desired_state[param]
+
+
+def update_vm_cpu(module):
+    return update_vm_with(module, param='vm_cpus', function=module.vm_modify_cpu())
+
+
+def update_vm_memory(module):
+    return update_vm_with(module, param='vm_memory', function=module.vm_modify_memory())
+
+
+def update_vm_metadata(module):
+    if 'metadata' in module.params:
+        vapp_name = module.params['vapp_name']
+        vm_name = module.params['vm_name']
+        vm = module.get_vm(vapp_name, vm_name)
+        module.vm_set_metadata(vm=vm, metadata_dict=module.params['metadata'])
+        return True
+    else:
+        return False
+
 
 def update_vm_with(module, param, function):
     if param in module.params:
@@ -237,7 +251,7 @@ def update_vm_with(module, param, function):
         vm = module.get_vm(vapp_name, vm_name)
         module.wait_for_task(vm.power_off())
         module.wait_for_task(function(vm, module.params[param]))
-        vm = module.get_vm(vapp_name, vm_name)
+        vm.reload()
         module.wait_for_task(vm.power_on())
         return True
     else:
@@ -275,26 +289,7 @@ def get_vm_spec(module):
     return spec
 
 
-def change_vm(module, difference):
-    needs_change = len(difference) > 0
-    changed = False
-    if module.check_mode:
-        return True
-    if needs_change:
-        vapp_name = module.params['vapp_name']
-        vm_name = module.params['vm_name']
-        vm = module.get_vm(vapp_name, vm_name)
-        for diff in difference:
-            if diff == 'vm_cpus':
-                update_vm_with(module,param='vm_cpus', function=VM.modify_cpu)
-                changed = True
-            elif diff == 'vm_memory':
-                update_vm_with(module,param='vm_memory', function=VM.modify_memory)
-                changed = True
-    return changed
-
 def main():
-
     interface_sub_spec = dict(
         primary=dict(default=False, type='bool'),
         network=dict(required=True, type='str'),
@@ -334,16 +329,16 @@ def main():
 
     logging.debug("Diff %s" % result['diff'].__repr__())
     if instance is not None and desired_state == 'absent':
-         if instance['vm_state'] != 'absent':
-             delete_vm(module)
-             result['changed'] = True
+        if instance['vm_state'] != 'absent':
+            delete_vm(module)
+            result['changed'] = True
 
     elif desired_state != 'absent':
-         if instance['vm_state'] == 'absent':
-             create_vm(module)
-             result['changed'] = True
-         else:
-             result['changed'] = change_vm(module, result['diff'])
+        if instance['vm_state'] == 'absent':
+            create_vm(module)
+            result['changed'] = True
+        else:
+            result['changed'] = change_vm(module, result['diff'])
     if result['changed'] != True:
         del result['diff']
     return module.exit(**result)
@@ -351,4 +346,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
