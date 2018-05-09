@@ -8,20 +8,25 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
-ANSIBLE_METADATA = {'metadata_version': '1.0',
+ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
                     'supported_by': 'community'}
 
 DOCUMENTATION = '''
 ---
 module: vcd_vapp
+
 short_description: Manages vApp vCloud Director instances.
+
 description:
-  - This module will actively managed vCloud Director vApp instances.  Instances
-    can be created and deleted as well as both deployed and undeployed.
-version_added: "2.0"
+  - "This module will actively managed vCloud Director vApp instances.
+    Instances can be created and deleted as well as both deployed and undeployed."
+
+version_added: "2.5"
+
 author:
 - Fabian Landis (@fabland)
+
 options:
   vapp_name:
     description:
@@ -34,14 +39,18 @@ options:
     choices: ['present', 'absent', 'deployed', 'undeployed']
   metadata:
     description:
-      - Dictionary of name - value entries that are added to the vApp (as vcloud metadata type string)
+      - "Dictionary of name and value entries that are added to the vApp (as vcloud metadata type string)"
   network_name:
-      - Name of the network to connect the vapp to. Other networks can be created and added with the vcd_net module.
+    description:
+      - "Name of the network to connect the vapp to. Other networks can be created and added with the vcd_net module."
 extends_documentation_fragment: vcd_utils
 '''
 
-EXAMPLES = '''
+rest = '''
 
+'''
+
+EXAMPLES = '''
   vars:
      internal_vm_ip: 10.0.0.50
      vcd_connection_common:
@@ -52,7 +61,6 @@ EXAMPLES = '''
         vdc_name: myvdc
         verify_certs: no
         api_version: "29.0"
-     
   tasks:
   # Example how to create empty vapp container
      - name: Demo app vApp container
@@ -64,7 +72,6 @@ EXAMPLES = '''
          metadata:
            mytagx: metadatavalue
            mytagy: "some other value"
-
 '''
 
 from ansible.module_utils.vcd_utils import VcdAnsibleModule, VcdError

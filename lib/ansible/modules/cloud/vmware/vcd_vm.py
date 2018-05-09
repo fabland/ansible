@@ -3,59 +3,58 @@
 # Copyright: (c) 2015, Ansible, Inc.
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 # copied and modified from vca_vapp.py
-
 from __future__ import absolute_import, division, print_function
-
-import json
 
 __metaclass__ = type
 
-ANSIBLE_METADATA = {'metadata_version': '1.0',
+ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
                     'supported_by': 'community'}
 
 DOCUMENTATION = '''
-    )
 ---
 module: vcd_vm
+
 short_description: Manages VMs in vCloud Director instances.
+
 description:
-  - This module will actively managed VMs in vCloud Director instances. Instances
-    can be created and deleted as well as both started and stopped.
-version_added: "2.0"
+  - "This module will actively managed VMs in vCloud Director instances.
+  Instances can be created and deleted as well as both started and stopped."
+
+version_added: "2.5"
+
 author:
 - Fabian Landis (@fabland)
+
 options:
   vm_name:
     description:
       - The name of the vCloud VM
-    required: yes
+    required: true
   vm_hostname:
     description:
       - The hostname of the VM
-    required: yes  
+    required: true
   catalog:
     description:
       - Catalog that contains the template to use for VM.
   template:
     description:
-      - Template name to use for VM creation. Required if vm
-      does not exist.
+      - Template name to use for VM creation. Required if vm does not exist.
   vapp_name:
     description:
       - The name of the vCloud vApp instance. The vApp has to exist.
-    required: yes
+    required: true
   admin_password:
     description:
       - The root or administrator password if it should be set.
   interfaces:
     description:
-      - List of network interfaces to create. They should have the following
-       dictionary entries:
-        - primary: True for primary interface (optional)
-        - network: the network name to link the interface to
-        - addressing_type: can be ['pool', 'dhcp', 'static']
-        - ip_address: for static addressing_type the ip that should be assigned
+      - "List of dictionaries of network interfaces to create. The dictionaries should have the following dictionary entries:"
+      - "- primary: True for primary interface (optional)"
+      - "- network: the network name to link the interface to"
+      - "- addressing_type: can be ['pool', 'dhcp', 'static']"
+      - "- ip_address: for static addressing_type the ip that should be assigned"
   vm_cpus:
     description:
       - Number of CPUs
@@ -64,8 +63,7 @@ options:
       - MBytes of memory for VM
   custom_script:
     description:
-      - Customization script that should be executed
-      when VM is created. 
+      - Customization script that should be executed when VM is created.
   state:
     description:
       - Configures the state of the vApp.
@@ -73,12 +71,11 @@ options:
     choices: ['present', 'absent', 'poweron', 'poweroff']
   metadata:
     description:
-      - Dictionary of name - value entries that are added to the vm (as vcloud metadata type string)
+      - Dictionary of name and value entries that are added to the vm (as vcloud metadata type string)
 extends_documentation_fragment: vcd_utils
 '''
 
 EXAMPLES = '''
-
   vars:
      internal_vm_ip: 10.0.0.50
      vcd_connection_common:
@@ -115,10 +112,11 @@ EXAMPLES = '''
          metadata:
            mytag1: value123
            mytag2: xyz
-
 '''
 
+
 from ansible.module_utils.vcd_utils import VcdAnsibleModule, VcdError
+import json
 import logging
 
 VM_STATUS = {
@@ -128,7 +126,7 @@ VM_STATUS = {
     'Resolved': 'resolved'
 }
 
-VM_STATES = ['present', 'absent']
+VM_STATES = ['present', 'absent', 'poweron', 'poweroff']
 
 VM_DIFF_PROPS = ['vm_memory',
                  'vm_cpus',
