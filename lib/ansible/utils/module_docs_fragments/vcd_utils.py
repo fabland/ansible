@@ -22,14 +22,33 @@ class ModuleDocFragment(object):
 options:
     vcd_connection:
       description:
-        - "Dictionary of common connection details needed to connect to vcloud with the following entries:"
-        - "-  username: The vcd username. aliases: ['user']"
-        - "-  password: The vcd password. aliases: ['pass', 'passwd']"
-        - "-  org: The org to login to for creating vapp"
-        - "-  host:The authentication host to be used."
-        - "-  api_version: The api version to be used with the vcd. default: '29.0'" 
-        - "-  verify_certs: If the certificates of the authentication is to be verified. default: 'yes'"
-        - "-  vdc_name: The name of the vdc."
+        - "Dictionary of common connection details needed to connect to vcloud"
+      subotions:
+        username:
+          description:
+            - The vcd username. 
+          aliases: ['user']
+        password:
+          description:
+            - The vcd password.
+          aliases: ['pass', 'passwd']
+        org:
+          description:
+            - The org to login to for creating vapp
+        host:
+          description:
+            - The authentication host to be used
+        api_version: 
+          description:
+            - The api version to be used with the vcd
+          default: '29.0'
+        verify_certs:
+          description:
+            - If the certificates of the authentication is to be verified.
+          default: 'yes'
+        vdc_name:
+          description: 
+            - The name of the vdc
     gateway_name:
       description:
         - The name of the gateway of the vdc where the rule should be added.

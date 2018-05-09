@@ -50,11 +50,21 @@ options:
       - The root or administrator password if it should be set.
   interfaces:
     description:
-      - "List of dictionaries of network interfaces to create. The dictionaries should have the following dictionary entries:"
-      - "- primary: True for primary interface (optional)"
-      - "- network: the network name to link the interface to"
-      - "- addressing_type: can be ['pool', 'dhcp', 'static']"
-      - "- ip_address: for static addressing_type the ip that should be assigned"
+      - "List of of network interfaces to create. Each interface is a dictionary."
+    suboptions:
+      primary:
+        description:
+          - True for primary interface
+      network:
+        description:
+          - The network name to link the interface to
+      addressing_type:
+        description:
+          - Interface ip allocation type
+        choices: ['pool', 'dhcp', 'static']
+      ip_address:
+        description:
+          - "for static addressing_type the ip that should be assigned"
   vm_cpus:
     description:
       - Number of CPUs
@@ -144,12 +154,16 @@ def get_instance(module):
                 vapp_state='absent',
                 vm_name=vm_name,
                 vm_state='absent')
-    vapp_dict = module.get_vapp_dict(vapp_name)
-    logging.debug("Vapp dict -- %s" % vapp_dict.__repr__())
-    if not vapp_dict or VM_STATUS.get(vapp_dict['status'], 'unknown') is 'unknown':
-        raise VcdError("vApp with name %s not ready for VM deployment" % vapp_name)
-    else:
-        inst['vapp_state'] = 'present'
+    try:
+        vapp_dict = module.get_vapp_dict(vapp_name)
+        logging.debug("Vapp dict -- %s" % vapp_dict.__repr__())
+        if not vapp_dict or VM_STATUS.get(vapp_dict['status'], 'unknown') is 'unknown':
+            return inst
+        else:
+            inst['vapp_state'] = 'present'
+    except VcdError:
+        return inst
+
     try:
         vm_dict = module.get_vm_dict(vapp_name, vm_name)
         if vm_dict is not None:

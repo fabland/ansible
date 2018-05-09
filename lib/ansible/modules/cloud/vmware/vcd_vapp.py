@@ -46,10 +46,6 @@ options:
 extends_documentation_fragment: vcd_utils
 '''
 
-rest = '''
-
-'''
-
 EXAMPLES = '''
   vars:
      internal_vm_ip: 10.0.0.50
