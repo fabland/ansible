@@ -71,7 +71,6 @@ EXAMPLES = '''
 '''
 
 from ansible.module_utils.vcd_utils import VcdAnsibleModule, VcdError
-import logging
 
 VAPP_STATUS = {
     'Powered off': 'poweroff',
@@ -80,6 +79,7 @@ VAPP_STATUS = {
 }
 
 VAPP_STATES = ['present', 'absent', 'deployed', 'undeployed']
+
 
 def get_instance(module):
     vapp_name = module.params['vapp_name']
@@ -114,12 +114,13 @@ def create(module):
         for name, value in module.params['metadata'].items():
             vapp.set_metadata(key=name, value=value, domain='GENERAL', visibility='READWRITE')
 
+
 def delete(module):
     vapp_name = module.params['vapp_name']
     module.vdc.delete_vapp(name=vapp_name, force=True)
 
-def main():
 
+def main():
     argument_spec = dict(
         vapp_name=dict(required=True),
         network_name=dict(required=True),

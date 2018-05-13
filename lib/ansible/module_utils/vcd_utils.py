@@ -3,7 +3,10 @@
 # Author: Fabian Landis (@fabland)
 
 try:
-    from pyvcloud.vcd.client import Client, TaskStatus, NSMAP, E
+    from pyvcloud.vcd.client import Client
+    from pyvcloud.vcd.client import TaskStatus
+    from pyvcloud.vcd.client import NSMAP
+    from pyvcloud.vcd.client import E
     from pyvcloud.vcd.client import VcdErrorResponseException
     from pyvcloud.vcd.client import BasicLoginCredentials
     from pyvcloud.vcd.client import EntityType
@@ -24,10 +27,6 @@ except ImportError:
     HAS_PYVCLOUD = False
 
 from ansible.module_utils.basic import AnsibleModule
-from ansible.errors import AnsibleError
-import logging
-import json
-import os
 
 DEFAULT_VERSION = '29.0'
 
@@ -50,11 +49,13 @@ def vcd_sub_argument_spec():
         verify_certs=dict(type='bool', default=True)
     )
 
+
 def vcd_argument_spec():
     return dict(
-        vcd_connection=dict(type='dict', required=True, options=vcd_sub_argument_spec()), 
+        vcd_connection=dict(type='dict', required=True, options=vcd_sub_argument_spec()),
         gateway_name=dict(default='gateway')
-)
+    )
+
 
 class VcdAnsibleModule(AnsibleModule):
 
@@ -66,15 +67,9 @@ class VcdAnsibleModule(AnsibleModule):
 
         super(VcdAnsibleModule, self).__init__(*args, **kwargs)
 
-        #if self.params.get('password') is None:
-        #    self.params['password'] = os.environ.get('VCD_PASSWORD')
         if not HAS_PYVCLOUD:
             self.fail("python module pyvcloud >= 19 is required for this module")
-        
-        #missing_parameters = [key for key in required_common_parameters if self.params.get(key) is None]
-        #if len(missing_parameters) > 0:
-        #    self.fail("The following parameters are missing: %s" % missing_parameters)
-        
+
         self._common = self.params['vcd_connection']
         self._client = self.create_client_instance()
 
@@ -156,15 +151,18 @@ class VcdAnsibleModule(AnsibleModule):
         password = self._common['password']
         username = self._common['username']
         org = self._common['org']
-        
+
         if not org:
             raise VcdError('missing required org for service_type vcd')
 
         if not verify:
             requests.packages.urllib3.disable_warnings()
-
-        client = Client(host, verify_ssl_certs=verify, api_version=version,
-               log_file='/tmp/ansible_pyvcloud.log', log_requests=True, log_bodies=True, log_headers=True)
+        if self._debug:
+            self.debug('Logging vcloud calls to /tmp/ansible_pyvcloud.log')
+            client = Client(host, verify_ssl_certs=verify, api_version=version,
+                            log_file='/tmp/ansible_pyvcloud.log', log_requests=True, log_bodies=True, log_headers=True)
+        else:
+            client = Client(host, verify_ssl_certs=verify, api_version=version)
         try:
             client.set_credentials(BasicLoginCredentials(user=username, org=org, password=password))
         except VcdErrorResponseException as e:
@@ -187,7 +185,7 @@ class VcdAnsibleModule(AnsibleModule):
             for vmx in vapp_resource.Children.Vm:
                 if vmx.get('name') == vm_name:
                     vm = vmx
-        
+
         result = {}
         result_interfaces = []
         items = vm.xpath(
@@ -212,7 +210,7 @@ class VcdAnsibleModule(AnsibleModule):
             if hasattr(vm.GuestCustomizationSection, 'CustomizationScript'):
                 result['custom_script'] = vm.GuestCustomizationSection.CustomizationScript.text
         result['interfaces'] = result_interfaces
-        
+
         metadata = self.client.get_linked_resource(vm, RelationType.DOWN, EntityType.METADATA.value)
         # for vapp metadata -> copy over to vapp part
         if metadata is not None and hasattr(metadata, 'MetadataEntry'):
@@ -220,39 +218,30 @@ class VcdAnsibleModule(AnsibleModule):
             for me in metadata.MetadataEntry:
                 metadata_dict[me.Key.text] = me.TypedValue.Value.text
             result['metadata'] = metadata_dict
-        #logging.debug("Second result " + json.dumps(result, indent=4))
+        # logging.debug("Second result " + json.dumps(result, indent=4))
         return result
 
-
     def vm_set_metadata(self,
-                     vm,
-                     metadata_dict,
-                     domain='GENERAL',
-                     visibility='READWRITE',
-                     metadata_type='MetadataStringValue'):
+                        vm,
+                        metadata_dict,
+                        domain='GENERAL',
+                        visibility='READWRITE',
+                        metadata_type='MetadataStringValue'):
         vm_resource = self.client.get_resource(vm.href)
         for key, value in metadata_dict.items():
             new_metadata = E.Metadata(
                 E.MetadataEntry(
-                    { 'type': 'xs:string' }, E.Domain(domain, visibility=visibility), E.Key(key),
-                    E.TypedValue( { '{' + NSMAP['xsi'] + '}type': 'MetadataStringValue' }, E.Value(value))))
+                    {'type': 'xs:string'}, E.Domain(domain, visibility=visibility), E.Key(key),
+                    E.TypedValue({'{' + NSMAP['xsi'] + '}type': 'MetadataStringValue'}, E.Value(value))))
             metadata = self.client.get_linked_resource(
                 vm_resource, RelationType.DOWN, EntityType.METADATA.value)
             self.wait_for_task(self.client.post_linked_resource(metadata, RelationType.ADD,
-                                                    EntityType.METADATA.value,
-                                                    new_metadata))
+                                                                EntityType.METADATA.value,
+                                                                new_metadata))
             vm.reload()
-
 
     def logout(self):
         self._client.logout()
-
-    # def save_services_config(self, blocking=True):
-    #     task = self.gateway.save_services_configuration()
-    #     if not task:
-    #         self.fail(msg='unable to save gateway services configuration')
-    #     if blocking:
-    #         self.vca.block_until_completed(task)
 
     def wait_for_task(self, task):
         self.client.get_task_monitor().wait_for_success(task=task)

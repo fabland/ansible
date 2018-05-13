@@ -122,11 +122,11 @@ EXAMPLES = '''
 '''
 
 from ansible.module_utils.vcd_utils import VcdAnsibleModule, VcdError
-import logging
 
 NET_STATES = ['present', 'absent']
 
 NET_TYPES = ['isolated', 'direct', 'bridged', 'natRouted']
+
 
 def get_instance(module):
     network_type = module.params['network_type']
@@ -150,9 +150,8 @@ def get_instance(module):
 
     try:
         if net_dict is not None:
-            status = net_dict['status']
-            inst['status'] = VAPP_STATUS.get(status, 'unknown')
-            inst['state'] = 'deployed' if status in ['Deployed', 'Powered on'] else 'undeployed'
+            inst['status'] = net_dict['status']
+            inst['state'] = 'deployed' if inst['status'] in ['Deployed', 'Powered on'] else 'undeployed'
         return inst
     except VcdError:
         return inst
@@ -181,7 +180,6 @@ def create(module):
             module.wait_for_task(task)
     elif network_type == 'direct':
         result = module.vdc.create_directly_connected_vdc_network(
-            network_name=network_name,
             parent_network_name=module.params['parent_network_name'],
             description='created by ansible',
             is_shared=module.params['shared'])
@@ -197,6 +195,7 @@ def create(module):
     #     vapp = module.get_vapp(vapp_name)
     #     for name, value in module.params['metadata'].items():
     #         vapp.set_metadata(key=name, value=value, domain='GENERAL', visibility='READWRITE')
+
 
 def delete(module):
     network_type = module.params['network_type']
@@ -214,8 +213,8 @@ def delete(module):
     else:
         module.fail('Not implemented yet')
 
-def main():
 
+def main():
     argument_spec = dict(
         network_name=dict(required=True),
         metadata=dict(required=False, type='dict'),
